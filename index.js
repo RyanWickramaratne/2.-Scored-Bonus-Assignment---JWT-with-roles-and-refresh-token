@@ -14,6 +14,17 @@ const users = [
 ]
 
 
+// JTW Package
+const jwt = require('jsonwebtoken');
+
+// Secret Keys
+const JWTSECRET = '123';
+const REFRESH_SECRET = '456';
+
+// Store refresh tokens
+let refreshTokens = [];
+
+
 // ------------------- ROUTES -------------------
 
 // Use HTTP Basic Authentication for login
@@ -60,13 +71,6 @@ function httpBasicAuth (req, res, next) {
 
 
 //Login Route
-
-// JTW Package
-const jwt = require('jsonwebtoken');
-
-// JWT Secret Key
-const JWTSECRET = '123'
-
 app.post('/sign-in', httpBasicAuth , (req, res) => {
 
     // Chech the req.user object's username and password
@@ -83,7 +87,7 @@ app.post('/sign-in', httpBasicAuth , (req, res) => {
     console.log('Login Successful');
 
     // Create JWT Token with the correct role
-    const token = jwt.sign(
+    const accessToken = jwt.sign(
         // Payload
         {
             username: foundUser.username,
@@ -98,8 +102,26 @@ app.post('/sign-in', httpBasicAuth , (req, res) => {
     
     );
 
-    console.log('Token:', token);
-    res.json({ token });
+    const refreshToken = jwt.sign(
+        // Payload
+        { username: foundUser.username },
+        // Secret Key
+        REFRESH_SECRET,
+        // Other Options
+        {
+            expiresIn: '7d'
+        }
+    );
+
+    console.log('Access Token:', accessToken);
+    console.log('Refresh Token:', refreshToken);
+
+    // Store the refresh token
+    refreshTokens.push(refreshToken);
+    console.log('Added Refresh Tokens:', refreshTokens);
+
+    // Send the tokens to the client
+    res.json({ accessToken, refreshToken });
     
 });
 
@@ -184,7 +206,72 @@ app.post('/posts', authenticateToken, (req, res) => {
 
 
 
+// Refresh Token Route (Generates New Access Token)
+app.post('/refresh-token', (req, res) => {
 
+    // Get the refresh token from the request body
+    const { token } = req.body;
+    if (!token) {
+        return res.status(401).json({ message: 'Refresh Token Required' });
+    }
+
+    // Check if the refresh token is valid
+    if (!refreshTokens.includes(token)) {
+        return res.status(403).json({ message: 'Invalid Refresh Token' });
+    }
+
+    // Verify the refresh token
+    try 
+    {
+        const decoded = jwt.verify(token, REFRESH_SECRET);
+        console.log("Decoded: ", decoded);
+
+        // Check if the user exists
+        const user = users.find(element => element.username === decoded.username);
+        console.log("User: ", user);
+        if (!user) {
+            return res.status(403).json({ message: 'User Not Found' });
+        }
+
+        // Create a new access token
+        const newAccessToken = jwt.sign(
+            { 
+                username: user.username, 
+                role: user.role 
+            }, 
+            JWTSECRET,
+            { expiresIn: '15m' }
+        );
+
+        res.json({ accessToken: newAccessToken });
+    } 
+    catch (err) 
+    {
+        res.status(403).json({ message: err.message });
+    }
+});
+
+// Logout Route
+app.post('/logout', (req, res) => {
+
+    // See the refresh tokens
+    console.log("Before tokens: ", refreshTokens);
+
+    if (!req.body.token) {
+        return res.status(401).json({ message: 'Refresh Token Required' });
+    }
+
+    // Check if the refresh token is valid
+    if (!refreshTokens.includes(req.body.token)) {
+        return res.status(403).json({ message: 'Invalid Refresh Token' });
+    }
+
+    // Remove the refresh token from the refreshTokens array
+    refreshTokens = refreshTokens.filter((element) => element !== req.body.token);
+    console.log("After tokens: ", refreshTokens);
+
+    res.json({ message: 'Refresh Token Deleted' });
+});
 
 
 
